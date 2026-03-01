@@ -1,0 +1,23 @@
+[package]
+name = "goldsrc_dsp"
+version = "0.1.0"
+edition = "2021"
+description = "GoldSrc Reverb DSP — library + offline CLI validator"
+authors = ["Martin Arias <arias.martin1@gmail.com>"]
+# license = "GPL-3.0-or-later" # VST3 supports requieres GPL license
+# homepage = "shipisnature.com"
+
+# ── Library (consumed by the nih_plug plugin crate) ──────────────────────────
+[lib]
+name = "goldsrc_dsp"
+path = "src/lib.rs"
+
+# ── Binary (offline WAV tester, not shipped in the plugin) ───────────────────
+[[bin]]
+name = "goldsrc_dsp"
+path = "src/main.rs"
+
+[dependencies]
+rand  = "0.8"
+hound = "3.5"
+clap  = { version = "4", features = ["derive"] }
