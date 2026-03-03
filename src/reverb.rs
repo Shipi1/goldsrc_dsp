@@ -409,7 +409,7 @@ impl GoldSrcReverb {
     /// `set_reverb_mix()`, `set_delay_mix()`, and `set_clip_mode()`.
     ///
     /// Signal flow:
-    ///   Input → AMod → DoReverb → Dry/Wet → DoDelay (additive) → DoStereoDelay → Output
+    ///   Input → AMod → DoReverb (100% wet) → DoDelay (additive) → DoStereoDelay → Dry/Wet → Output
     pub fn process(&mut self, left: &[f32], right: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
         let n = left.len();
 
@@ -436,9 +436,9 @@ impl GoldSrcReverb {
             self.do_amod(&mut out_l[..n], &mut out_r[..n]);
         }
 
-        // Step 2: Reverb → Dry/Wet crossfade (in-place)
+        // Step 2: Reverb (100% wet output)
         if self.reverb_active {
-            self.do_reverb_inplace(&mut out_l[..n], &mut out_r[..n], reverb_mix);
+            self.do_reverb_inplace(&mut out_l[..n], &mut out_r[..n]);
         }
 
         // Step 3: Mono Echo (additive on top of mixed signal)
@@ -449,6 +449,15 @@ impl GoldSrcReverb {
         // Step 4: Stereo Widening (Haas effect)
         if self.stereo_active {
             self.do_stereo_delay(&mut out_l[..n], &mut out_r[..n]);
+        }
+
+        // Step 5: Final dry/wet crossfade (applied once, after the full wet chain)
+        {
+            let dry_mix = 1.0 - reverb_mix;
+            for i in 0..n {
+                out_l[i] = dry_mix * left[i] + reverb_mix * out_l[i];
+                out_r[i] = dry_mix * right[i] + reverb_mix * out_r[i];
+            }
         }
 
         // Final output limiter
@@ -542,18 +551,16 @@ impl GoldSrcReverb {
     //  RVB_DoReverb — 2-tap feedback delay network
     // -------------------------------------------------------------------------
 
-    /// In-place reverb: reads dry from `left`/`right`, writes mixed result back.
-    /// `reverb_mix`: 0.0 = fully dry, 1.0 = fully wet.
+    /// In-place reverb: writes 100% wet reverb signal into `left`/`right`.
+    /// The dry/wet crossfade is handled externally by `process()`.
     /// **Zero allocations.**
     #[inline]
-    fn do_reverb_inplace(&mut self, left: &mut [f32], right: &mut [f32], reverb_mix: f32) {
+    fn do_reverb_inplace(&mut self, left: &mut [f32], right: &mut [f32]) {
         let n = left.len();
 
         if self.reverb_dly[0].delay_samples == 0 {
             return;
         }
-
-        let dry_mix = 1.0 - reverb_mix;
 
         // Pre-compute input scale per tap: 1 / (1 + feedback)
         let scale0 = 1.0 / (1.0 + self.reverb_dly[0].feedback);
@@ -570,9 +577,9 @@ impl GoldSrcReverb {
             let wet1 = self.reverb_one_tap(1, vlr * scale1, dry_l, dry_r);
             let wet = wet0 + wet1;
 
-            // Dry/wet crossfade in-place
-            left[i] = dry_mix * dry_l + reverb_mix * wet;
-            right[i] = dry_mix * dry_r + reverb_mix * wet;
+            // 100% wet — crossfade is applied later in process()
+            left[i] = wet;
+            right[i] = wet;
         }
     }
 
