@@ -270,6 +270,11 @@ impl GoldSrcReverb {
         self.clip_mode = mode;
     }
 
+    /// Re-seed the internal RNG. Takes effect immediately.
+    pub fn set_rng_seed(&mut self, seed: u64) {
+        self.rng = StdRng::seed_from_u64(seed);
+    }
+
     /// Hard-reset all delay buffers and filter state to silence.
     ///
     /// Call this from the host's `reset()` / `initialize()` callback —
