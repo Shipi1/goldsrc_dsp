@@ -118,6 +118,7 @@ pub fn preset_for_room(room: usize) -> Preset {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipMode {
+    Off,
     Hard,
     Soft,
 }
@@ -467,6 +468,7 @@ impl GoldSrcReverb {
 
         // Final output limiter
         match clip_mode {
+            ClipMode::Off => {}
             ClipMode::Soft => {
                 for v in out_l.iter_mut() {
                     *v = soft_clip_knee(*v, SOFT_CLIP_THRESHOLD);

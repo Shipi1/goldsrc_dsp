@@ -168,6 +168,7 @@ fn process_room(
 fn parse_clip_mode(s: &str) -> ClipMode {
     match s {
         "soft" => ClipMode::Soft,
+        "off" => ClipMode::Off,
         _ => ClipMode::Hard,
     }
 }
