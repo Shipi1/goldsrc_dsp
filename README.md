@@ -50,7 +50,7 @@ goldsrc_dsp <INPUT> [OPTIONS]
 | `--room <N>` | `5` | Room preset index (0–28) |
 | `--mix <F>` | `0.17` | Reverb dry/wet (0.0 = dry, 1.0 = wet) |
 | `--delay-mix <F>` | `0.25` | Echo wet amount (0.0 = off, 1.0 = full) |
-| `--clip <MODE>` | `hard` | Output clipping: `hard` or `soft` |
+| `--clip <MODE>` | `hard` | Output clipping: `hard`, `soft` or `off` |
 | `-o, --output <PATH>` | auto | Output WAV path (default: `<input>_<room>.wav`) |
 | `--all` | — | Render all 29 room presets into a subfolder |
 
