@@ -1,6 +1,6 @@
 [package]
 name = "goldsrc_dsp"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "GoldSrc Reverb DSP — library + offline CLI validator"
 authors = ["Martin Arias <arias.martin1@gmail.com>"]

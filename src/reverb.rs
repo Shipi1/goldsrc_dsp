@@ -308,6 +308,7 @@ impl GoldSrcReverb {
             return;
         }
 
+        let was_active = self.reverb_active;
         self.reverb_active = true;
         let size = size.min(MAX_REVERB_DELAY);
         let samples = (size * self.sample_rate as f32) as usize;
@@ -320,6 +321,7 @@ impl GoldSrcReverb {
             rvblp,
             500,
             self.sample_rate,
+            was_active,
         );
 
         // Tap 1: 0.71x size, mod period ~700 samples at 11kHz scaled
@@ -331,6 +333,7 @@ impl GoldSrcReverb {
             rvblp,
             700,
             self.sample_rate,
+            was_active,
         );
     }
 
@@ -341,21 +344,33 @@ impl GoldSrcReverb {
         lp: f32,
         kmod: i32,
         sample_rate: u32,
+        was_active: bool,
     ) {
         // Do NOT reset the buffer — existing reverb tail decays naturally
         // under the new feedback value, avoiding a hard click on preset change.
+        let old_delay_samples = dly.delay_samples;
         dly.delay_samples = delay_samples;
         dly.feedback = feedback;
         dly.lp_enabled = lp >= 1.0;
         dly.modulation = (kmod as f32 * sample_rate as f32 / 11025.0) as i32;
         dly.mod_cur = dly.modulation;
-        // Reposition output_pos relative to the live write head.
-        if delay_samples <= dly.buffer_size {
-            dly.output_pos = (dly.input_pos + dly.buffer_size - delay_samples) % dly.buffer_size;
+
+        // Compute new read-head position relative to the live write head.
+        let new_output_pos = if delay_samples <= dly.buffer_size {
+            (dly.input_pos + dly.buffer_size - delay_samples) % dly.buffer_size
         } else {
-            dly.output_pos = dly.input_pos;
+            dly.input_pos
+        };
+
+        // Read-head crossfade: if the tap was already running and the
+        // position actually changed, blend from old to new to avoid a click.
+        if was_active && old_delay_samples != 0 && new_output_pos != dly.output_pos {
+            dly.output_pos_xf = new_output_pos;
+            dly.xfade = REVERB_XFADE;
+        } else {
+            dly.output_pos = new_output_pos;
+            dly.xfade = 0;
         }
-        dly.xfade = 0;
     }
 
     fn setup_mono_delay(&mut self, delay: f32, feedback: f32, dlylp: f32) {
@@ -364,18 +379,30 @@ impl GoldSrcReverb {
             return;
         }
 
+        let was_active = self.mono_active;
         self.mono_active = true;
         let delay = delay.min(MAX_MONO_DELAY);
         let dly = &mut self.mono_dly;
+
         // Do NOT reset — let the echo tail decay under the new feedback value.
+        let old_delay_samples = dly.delay_samples;
         dly.delay_samples = (delay * self.sample_rate as f32) as usize;
         dly.feedback = feedback;
         dly.lp_enabled = dlylp < 1.0;
-        if dly.delay_samples <= dly.buffer_size {
-            dly.output_pos =
-                (dly.input_pos + dly.buffer_size - dly.delay_samples) % dly.buffer_size;
+
+        let new_output_pos = if dly.delay_samples <= dly.buffer_size {
+            (dly.input_pos + dly.buffer_size - dly.delay_samples) % dly.buffer_size
         } else {
-            dly.output_pos = dly.input_pos;
+            dly.input_pos
+        };
+
+        // Read-head crossfade: blend from old to new position to avoid a click.
+        if was_active && old_delay_samples != 0 && new_output_pos != dly.output_pos {
+            dly.output_pos_xf = new_output_pos;
+            dly.xfade = REVERB_XFADE;
+        } else {
+            dly.output_pos = new_output_pos;
+            dly.xfade = 0;
         }
     }
 
@@ -385,19 +412,31 @@ impl GoldSrcReverb {
             return;
         }
 
+        let was_active = self.stereo_active;
         self.stereo_active = true;
         let left_delay = left_delay.min(MAX_STEREO_DELAY);
         let dly = &mut self.stereo_dly;
-        // Do NOT reset — reposition read head smoothly relative to write head.
+
+        let old_delay_samples = dly.delay_samples;
         dly.delay_samples = (left_delay * self.sample_rate as f32) as usize;
         dly.modulation = 0;
         dly.mod_cur = 0;
-        dly.xfade = 0;
-        if dly.delay_samples <= dly.buffer_size {
-            dly.output_pos =
-                (dly.input_pos + dly.buffer_size - dly.delay_samples) % dly.buffer_size;
+
+        let new_output_pos = if dly.delay_samples <= dly.buffer_size {
+            (dly.input_pos + dly.buffer_size - dly.delay_samples) % dly.buffer_size
         } else {
-            dly.output_pos = dly.input_pos;
+            dly.input_pos
+        };
+
+        // If delay was already running and the position actually changed,
+        // crossfade from the old read head to the new one to avoid a click.
+        if was_active && old_delay_samples != 0 && new_output_pos != dly.output_pos {
+            dly.output_pos_xf = new_output_pos;
+            dly.xfade = STEREO_XFADE;
+        } else {
+            // First activation or no change — jump directly.
+            dly.output_pos = new_output_pos;
+            dly.xfade = 0;
         }
     }
 
@@ -669,9 +708,26 @@ impl GoldSrcReverb {
         let input_scale = 1.0 / (1.0 + dly.feedback);
 
         for i in 0..left.len() {
-            let delay = dly.buffer[dly.output_pos];
+            let mut delay = dly.buffer[dly.output_pos];
 
-            if delay.abs() > 1e-10 || left[i].abs() > 1e-10 || right[i].abs() > 1e-10 {
+            if delay.abs() > 1e-10 || left[i].abs() > 1e-10 || right[i].abs() > 1e-10
+                || dly.xfade != 0
+            {
+                // Read-head crossfade: blend old → new position on param change
+                if dly.xfade != 0 {
+                    let sample_xf = dly.buffer[dly.output_pos_xf]
+                        * (REVERB_XFADE - dly.xfade) as f32
+                        / REVERB_XFADE as f32;
+                    delay = (delay * dly.xfade as f32 / REVERB_XFADE as f32) + sample_xf;
+
+                    dly.output_pos_xf = (dly.output_pos_xf + 1) % dly.buffer_size;
+
+                    dly.xfade -= 1;
+                    if dly.xfade == 0 {
+                        dly.output_pos = dly.output_pos_xf;
+                    }
+                }
+
                 // Mono downmix, scaled down for headroom
                 let mut val = (left[i] + right[i]) * 0.5 * input_scale + dly.feedback * delay;
 
