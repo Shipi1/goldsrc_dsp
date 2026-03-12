@@ -807,7 +807,7 @@ impl GoldSrcReverb {
                 }
 
                 // Record current left, replace with delayed
-                dly.buffer[dly.input_pos] = left[i].clamp(-1.0, 1.0);
+                dly.buffer[dly.input_pos] = left[i];
                 left[i] = delay;
             } else {
                 dly.buffer[dly.input_pos] = 0.0;
